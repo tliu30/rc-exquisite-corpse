@@ -1,0 +1,13 @@
+[project]
+name = "receipt-printer-exquisite-corpse"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "imutils>=0.5.4",
+    "jupyterlab>=4.5.7",
+    "matplotlib>=3.10.9",
+    "opencv-python>=4.13.0.92",
+    "scikit-image>=0.26.0",
+]
