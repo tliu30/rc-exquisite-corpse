@@ -11,3 +11,6 @@ wheels/
 
 tags
 .ipynb_checkpoints/
+
+botserverrc
+rcprinter.conf.json

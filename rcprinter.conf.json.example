@@ -1,0 +1,7 @@
+{
+    "cookies": {
+        "receipt_csrf": "login to receipt.recurse.com",
+        "session": "login to receipt.recurse.com",
+        "session.sig": "login to receipt.recurse.com"
+    }
+}
