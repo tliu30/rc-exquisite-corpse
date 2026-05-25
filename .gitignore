@@ -15,3 +15,5 @@ tags
 botserverrc
 rcprinter.conf.json
 zuliprc
+
+data/
