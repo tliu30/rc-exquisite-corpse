@@ -1,0 +1,5 @@
+[api]
+email=some bot email
+key=some key
+site=some zulipchat domain
+token=some token (for an outgoing webhook)
