@@ -154,3 +154,4 @@ def build_title(text: str, path_to_font_ttf: str, font_size: int) -> np.ndarray:
     im = np.array(canvas)
 
     return crop_and_center(im)
+

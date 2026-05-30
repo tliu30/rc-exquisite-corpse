@@ -16,7 +16,7 @@ class RCPrinterClient:
     def send_image(self, image_data: bytes, image_format: str = "jpeg") -> None:
         url = f"{self.base_url}/image"
 
-        requests.post(
+        response = requests.post(
             url,
             data=image_data,
             cookies=self.cookies,
@@ -25,5 +25,6 @@ class RCPrinterClient:
                 "Content-Type": f"image/{image_format}",
             }
         )
+        print(f"{response.status_code} - {response.content}")
 
 
