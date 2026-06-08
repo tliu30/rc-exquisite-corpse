@@ -6,6 +6,11 @@ from zulip import Client
 
 ZulipMessage = dict[str, t.Any]
 
+
+class ZulipClientException(Exception):
+    pass
+
+
 class ZulipClient:
 
     def __init__(self, config_file):
@@ -34,16 +39,15 @@ class ZulipClient:
 
         return email
 
-    def get_image(self, relative_image_url: str) -> bytes | None:
+    def get_image(self, relative_image_url: str) -> bytes:
         full_url = f"{self.__host__}/{relative_image_url}"
 
         if not self.__client__.session:
-            return None
+            raise ZulipClientException("no session found")
 
         response = self.__client__.session.get(full_url)
 
-        if not response.ok:
-            return None
+        response.raise_for_status()
 
         return response.content
 
@@ -68,14 +72,21 @@ def parse_mentioned_user_from_message(message: ZulipMessage) -> int | None:
 
 def parse_image_url_from_message(message: ZulipMessage) -> str | None:
     content = message.get("rendered_content")
+    print(f"Found content: {content}")
 
     if not content:
         return None
 
     results = re.search(r'<img.+data-original-src="([^"]+?)"', content)
 
-    if not results:
+    if results:
+        return results.groups()[0]
+
+    # Else, might match mobile format!
+    mobile_results = re.search(r'href="(/user_uploads/[^"]+?)"', content)
+
+    if not mobile_results:
         return None
 
-    return results.groups()[0]
+    return mobile_results.groups()[0]
 

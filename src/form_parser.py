@@ -9,6 +9,9 @@ from PIL import Image
 
 from image_builder import ARUCO_DICT
 
+class FormParserException(Exception):
+    pass
+    
 
 def convert_pil_to_opencv(img: Image.Image) -> np.ndarray:
     """To convert from PIL format to opencv, need to reverse color channels"""
@@ -23,6 +26,10 @@ def convert_opencv_to_pil(img: np.ndarray) -> Image.Image:
 
 def get_opencv_image_from_bytes(b: bytes) -> np.ndarray:
     return convert_pil_to_opencv(Image.open(BytesIO(b)))
+
+
+def convert_opencv_image_to_bytes(img: np.ndarray) -> bytes:
+    return convert_opencv_to_pil(img).tobytes()
 
 
 def detect_markers(image: np.ndarray) -> list[tuple[np.ndarray, np.ndarray]]:
@@ -88,6 +95,19 @@ def fix_rotation_given_marker(image: np.ndarray, corners: np.ndarray):
 
 
 
+def crop_border(image: np.ndarray) -> np.ndarray:
+    by_row = (image == 0).all(axis=1).tolist()
+    by_col = (image == 0).all(axis=0).tolist()
+    
+    # Get first non-black pixel
+    x0 = by_row.index(False)
+    x1 = len(by_row) - by_row[::-1].index(False)
+    y0 = by_col.index(False)
+    y1 = len(by_col) - by_col[::-1].index(False)
+
+    return image[x0:x1, y0:y1]
+
+
 def reorder_markers(markers: list[tuple[np.ndarray, np.ndarray]]) -> list[tuple[np.ndarray, np.ndarray]]:
     """Assuming image is rotated so that it is squared up, ensure corners ordered"""
     # Unpack markers object
@@ -117,32 +137,48 @@ def reorder_markers(markers: list[tuple[np.ndarray, np.ndarray]]) -> list[tuple[
 
 def parse_form(image: np.ndarray, transformed_size: int) -> tuple[np.ndarray, list[int]]:
     """Can still fail"""
-
     # Convert to grayscale, and feed to the detector
     as_grayscale = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
 
     # Get markers, retrying at slightly different rotations if unsuccessful
     markers: list[tuple[np.ndarray, np.ndarray]] = []
     mod_image = as_grayscale.copy()
+    marker_tl_found = False    # for debugging
+    any_markers_found = False  # for debugging
+    max_num_markers_found = -1 # for debugging
     for rotation_deg in [0, 15, 30, 45, -15, -30, -45]:
         if rotation_deg:
             mod_image = rotate_image(as_grayscale, rotation_deg)
         markers = detect_markers(mod_image)
 
-        if markers and any(l == 0 for (l, _) in markers):
-            break
+        max_num_markers_found = max(len(markers), max_num_markers_found)
+        if markers:
+            any_markers_found = True
+            if any(l == 0 for (l, _) in markers):
+                marker_tl_found = True
+                break
 
     # Straighten out image given the top left corner marker (always label 0)
     candidates = [c for (l, c) in markers if l == 0]
     if not candidates:
-        raise Exception("BLARP")
+        msg = "Unable to parse form: "
+
+        if not any_markers_found:
+            msg = msg + "no markers found"
+        elif not marker_tl_found:
+            msg = msg + f"found up to {max_num_markers_found}, but never the top left marker"
+        else:
+            msg = msg + "found markers, and found top left marker; some other error"
+
+        raise FormParserException(msg)
 
     label_0_corners = candidates[0]
     mod_image = fix_rotation_given_marker(mod_image, label_0_corners)
+    # mod_image = crop_border(mod_image)
     markers = detect_markers(mod_image)
 
     if len(markers) != 4:
-        raise Exception("BLARP")
+        raise FormParserException(f"Unable to parse form: found {len(markers)}; expected 4")
 
     # Reorder markers to be (tl, tr, br, bl)
     labels, corners = zip(*reorder_markers(markers))

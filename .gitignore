@@ -18,3 +18,7 @@ zuliprc
 
 data/
 .DS_Store
+
+*.db
+*.jpg
+*.jpeg

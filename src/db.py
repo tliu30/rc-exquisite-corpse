@@ -69,6 +69,7 @@ def create_game(conn: sqlite3.Connection, created_by: int, length: int = 5) -> i
         """,
         (length, created_by, now_timestamp_s()),
     )
+    conn.commit()
 
     if not res.lastrowid:
         raise Exception("Unexpected: there is no last row id after insert")
@@ -84,6 +85,109 @@ def get_drawing(conn: sqlite3.Connection, drawing_id: int):
         WHERE id = ?;
         """,
         (drawing_id, ),
+    )
+    return res.fetchone()
+
+
+def get_game_is_complete(conn: sqlite3.Connection, game_id: int):
+    res = conn.execute(
+        """
+        SELECT
+            MAX(game.length),
+            MAX(drawing.drawingNumber)
+        FROM
+            game LEFT JOIN
+            drawing ON 
+            game.id = drawing.gameId
+        WHERE
+            game.id = ?
+        """,
+        (game_id, ),
+    )
+
+    record = res.fetchone()
+    print(f"get game is complete {record}")
+
+    if not record:
+        raise Exception(f"Could not get data for game {game_id}")
+
+    return record[0] == record[1]
+
+
+def get_all_drawings_for_game(conn: sqlite3.Connection, game_id: int) -> list[bytes]:
+    res = conn.execute(
+        """
+        SELECT drawing.imageData
+        FROM drawing
+        WHERE drawing.gameId = ?;
+        """,
+        (game_id, ),
+    )
+
+    return [x[0] for x in res.fetchall()]
+
+
+def get_game_id_for_drawing(conn: sqlite3.Connection, drawing_id: int) -> int:
+    res = conn.execute(
+        """
+        SELECT gameId
+        FROM drawing
+        WHERE id = ?;
+        """,
+        (drawing_id, ),
+    )
+    return res.fetchone()[0]
+
+
+def get_games_for_user(conn: sqlite3.Connection, user_id: int):
+    res = conn.execute(
+        """
+        SELECT DISTINCT
+            gameId
+        FROM
+            game
+                LEFT JOIN
+            drawing
+                WHERE
+            game.id = drawing.gameId
+        WHERE
+            artistZulipId = ?;
+        """,
+        (user_id, )
+    )
+    return []
+
+
+def get_next_drawing_for_game(conn: sqlite3.Connection, game_id: int):
+    res = conn.execute(
+        """
+        SELECT
+            id,
+            artistZulipId
+        FROM drawing
+        WHERE
+            gameId = ? AND
+            submittedAt IS NULL;
+        """,
+        (game_id, ),
+    )
+
+    record = res.fetchone()
+
+    if not record:
+        raise Exception("No next artist found")
+
+    return { "id": record[0], "artist_zulip_id": record[1] }
+
+
+def get_drawing_by_game_id_and_drawing_number(conn: sqlite3.Connection, game_id: int, drawing_number: int):
+    res = conn.execute(
+        """
+        SELECT *
+        FROM drawing
+        WHERE gameId = ? AND drawingNumber = ?;
+        """,
+        (game_id, drawing_number),
     )
     return res.fetchone()
 
@@ -120,19 +224,19 @@ def get_drawing_is_final(conn: sqlite3.Connection, drawing_id: int):
                 LEFT JOIN
             drawing
                 ON
-            game.id = drawing.game_id
+            game.id = drawing.gameId
         WHERE
             drawing.id = ?
         """,
         (drawing_id, ),
     )
 
-    record = res.fetchone()[0]
+    record = res.fetchone()
 
     if record is None:
         raise Exception("Drawing not found")
 
-    return record[0] == record[1]
+    return record[0] <= record[1]
 
 
 def init_drawing(
@@ -148,6 +252,7 @@ def init_drawing(
         """,
         (game_id, next_drawing_number, artist_zulip_id, now_timestamp_s()),
     )
+    conn.commit()
 
     if not res.lastrowid:
         raise Exception("Unexpected: no last row id after insert")
@@ -172,5 +277,6 @@ def submit_drawing(
         """,
         (image_data, now_timestamp_s(), drawing_id),
     )
+    conn.commit()
 
 

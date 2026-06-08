@@ -1,3 +1,4 @@
+from io import BytesIO
 import numpy as np
 import cv2
 from PIL import Image
@@ -96,24 +97,28 @@ def build_drawing_area_with_aruco_markers(
     border_width: int = 3,
     marker_size: int = 48,
 ) -> np.ndarray:
+    MARKER_MARGIN = 4
+
     if drawing_area_size + 2 * border_width + 2 * marker_size > MAX_WIDTH:
         raise ValueError(f"Change dimensions: too big (max width {MAX_WIDTH}px)")
 
     # Prepend and append white space to add markers to
     im = np.vstack([
-        get_white_image((marker_size, MAX_WIDTH)),
-        build_drawing_area(),
-        get_white_image((marker_size, MAX_WIDTH)),
+        get_white_image((marker_size + MARKER_MARGIN, MAX_WIDTH)),
+        build_drawing_area(drawing_area_size=drawing_area_size, border_width=border_width),
+        get_white_image((marker_size + MARKER_MARGIN, MAX_WIDTH)),
     ])
 
     # Margin on the left and right sides of drawing area
-    margin_x = (MAX_WIDTH - drawing_area_size - 2 * border_width) / 2
+    margin_x = (MAX_WIDTH - drawing_area_size - 2 * border_width - 2 * MARKER_MARGIN) / 2
     if margin_x != int(margin_x):
         raise ValueError("Choose dimensions: x dimension must have integer margin")
 
     margin_x = int(margin_x)
 
     # Generate and add markers
+    print("SHAPE", im.shape)
+    height = im.shape[0]
     top_left_xys = (
         # top left
         (margin_x - marker_size, 0),
@@ -124,17 +129,19 @@ def build_drawing_area_with_aruco_markers(
         # bottom right
         (
             MAX_WIDTH - margin_x,
-            marker_size + drawing_area_size + border_width * 2,
+            height - marker_size,
         ),
 
         # bottom left
         (
             margin_x - marker_size,
-            marker_size + drawing_area_size + border_width * 2
+            height - marker_size,
+            # marker_size + drawing_area_size + border_width * 2
         ),
     )
 
     for (id_, (x, y)) in zip(ids, top_left_xys):
+        print(id_, x, y)
         im[y:(y + marker_size), x:(x + marker_size)] = get_marker(id_, marker_size)
 
     return im
@@ -154,4 +161,31 @@ def build_title(text: str, path_to_font_ttf: str, font_size: int) -> np.ndarray:
     im = np.array(canvas)
 
     return crop_and_center(im)
+
+
+def build_titled_card(text: str, path_to_font_ttf: str, ids: tuple[int,int,int]) -> np.ndarray:
+    # "/System/Library/Fonts/Supplemental/Arial.ttf",
+    title = build_title(text, path_to_font_ttf, 90)
+    drawing_card = build_drawing_area_with_aruco_markers(
+        (0, ids[0], ids[1], ids[2]),
+        drawing_area_size=200,
+        marker_size=144,
+    )
+
+    full_img = np.vstack([
+        title,
+        get_white_image((20, MAX_WIDTH)),
+        drawing_card,
+    ])
+
+    return full_img
+
+def get_completed_game(images: list[bytes]) -> np.ndarray:
+    return np.vstack([
+        np.array(
+            Image
+            .frombytes("RGB", (512, 512), x)
+            .resize((256, 256))
+        ) for x in images
+    ] * 3)
 
