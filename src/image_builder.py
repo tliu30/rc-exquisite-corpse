@@ -8,6 +8,7 @@ from PIL import ImageFont
 
 MAX_WIDTH = 512  # Receipt printer handles images up to 512 pixels wide
 ARUCO_DICT = cv2.aruco.getPredefinedDictionary(cv2.aruco.DICT_4X4_1000)
+PATH_TO_FONT = "/Library/Fonts/Arial Unicode.ttf"
 
 
 def get_white_image(size: tuple[int, int]) -> np.ndarray:
@@ -96,6 +97,9 @@ def build_drawing_area_with_aruco_markers(
     drawing_area_size: int = 400,
     border_width: int = 3,
     marker_size: int = 48,
+    addl_left: np.ndarray | None = None,
+    addl_top: np.ndarray | None = None,
+    addl_bottom: np.ndarray | None = None,
 ) -> np.ndarray:
     MARKER_MARGIN = 4
 
@@ -117,7 +121,6 @@ def build_drawing_area_with_aruco_markers(
     margin_x = int(margin_x)
 
     # Generate and add markers
-    print("SHAPE", im.shape)
     height = im.shape[0]
     top_left_xys = (
         # top left
@@ -141,10 +144,55 @@ def build_drawing_area_with_aruco_markers(
     )
 
     for (id_, (x, y)) in zip(ids, top_left_xys):
-        print(id_, x, y)
         im[y:(y + marker_size), x:(x + marker_size)] = get_marker(id_, marker_size)
 
+    # Add additional images (img, top, left, bottom, right)
+    # Place each next to the corresponding border
+    full_height, _ = im.shape
+
+    if addl_left is not None:
+        cur_h, cur_w = addl_left.shape
+        top = marker_size + MARKER_MARGIN + border_width
+        right = margin_x
+        bottom = top + cur_h
+        left = right - cur_w
+        
+        im[top:bottom, left:right] = addl_left
+
+    if addl_top is not None:
+        cur_h, cur_w = addl_top.shape
+        bottom = marker_size + MARKER_MARGIN
+        left = margin_x + MARKER_MARGIN + border_width
+        top = bottom - cur_h
+        right = left + cur_w
+        
+        im[top:bottom, left:right] = addl_top
+
+    if addl_bottom is not None:
+        cur_h, cur_w = addl_bottom.shape
+        top = full_height - marker_size - MARKER_MARGIN
+        left = margin_x + MARKER_MARGIN + border_width
+
+        bottom = top + cur_h
+        right = left + cur_w
+        
+        im[top:bottom, left:right] = addl_bottom
+
     return im
+
+
+def get_text(text: str, path_to_font_ttf: str, font_size: int, canvas_size: tuple[int, int], start: tuple[int, int]) -> np.ndarray:
+    canvas = Image.fromarray(get_white_image(canvas_size))
+
+    im_draw = ImageDraw.Draw(canvas)
+    im_draw.text(
+        start,
+        text,
+        font=ImageFont.truetype(path_to_font_ttf, font_size),
+        fill=(0,)
+    )
+
+    return np.array(canvas)
 
 
 def build_title(text: str, path_to_font_ttf: str, font_size: int) -> np.ndarray:
@@ -189,3 +237,91 @@ def get_completed_game(images: list[bytes]) -> np.ndarray:
         ) for x in images
     ] * 3)
 
+
+import os
+PROJECT_ROOT = "/Users/anthonyliu/Projects/receipt-printer-exquisite-corpse/"
+
+
+def load_title() -> np.ndarray:
+    path = os.path.join(PROJECT_ROOT, "./src/assets/title.jpeg")
+    return np.array(Image.open(path).convert(mode="L"))
+
+
+def load_draw_here() -> np.ndarray:
+    path = os.path.join(PROJECT_ROOT, "./src/assets/draw-instructions.jpeg")
+    return np.array(Image.open(path).convert(mode="L"))
+
+
+def load_prev_label() -> np.ndarray:
+    path = os.path.join(PROJECT_ROOT, "./src/assets/prev-drawing.jpeg")
+    return np.array(Image.open(path).convert(mode="L"))
+
+def load_youre_the_first() -> np.ndarray:
+    path = os.path.join(PROJECT_ROOT, "./src/assets/first.jpeg")
+    return np.array(Image.open(path).convert(mode="L"))
+
+def load_bottom_reminder() -> np.ndarray:
+    path = os.path.join(PROJECT_ROOT, "./src/assets/bottom.jpeg")
+    return np.array(Image.open(path).convert(mode="L"))
+
+def load_final_notice() -> np.ndarray:
+    path = os.path.join(PROJECT_ROOT, "./src/assets/final.jpeg")
+    return np.array(Image.open(path).convert(mode="L"))
+
+def build_start_form(ids: tuple[int, int, int], name: str):
+    return np.vstack([
+        load_title(),
+        np.zeros((1, 512), dtype=np.uint8),
+        get_text(f"For {name}", PATH_TO_FONT, 30, (60, 512), (10, 5)),
+        np.zeros((1, 512), dtype=np.uint8),
+        get_white_image((20, 512)),
+        build_drawing_area_with_aruco_markers(
+            (0, ids[0], ids[1], ids[2]),
+            drawing_area_size=200,
+            marker_size=144,
+            addl_left=load_draw_here(),
+            addl_top=load_youre_the_first(),
+            addl_bottom=load_bottom_reminder(),
+        ),
+    ])
+
+
+def build_middle_form(ids: tuple[int, int, int], name: str, prev_image: np.ndarray):
+    return np.vstack([
+        load_title(),
+        np.zeros((1, 512), dtype=np.uint8),
+        get_text(f"For {name}", PATH_TO_FONT, 30, (60, 512), (10, 5)),
+        np.zeros((1, 512), dtype=np.uint8),
+        get_white_image((20, 512)),
+        build_drawing_area_with_aruco_markers(
+            (0, ids[0], ids[1], ids[2]),
+            drawing_area_size=200,
+            marker_size=144,
+            addl_left=load_draw_here(),
+            addl_top=np.vstack([
+                load_prev_label(),
+                prev_image[-10:, :],
+            ]),
+            addl_bottom=load_bottom_reminder(),
+        ),
+    ])
+
+def build_final_form(ids: tuple[int, int, int], name: str, prev_image: np.ndarray):
+    return np.vstack([
+        load_title(),
+        np.zeros((1, 512), dtype=np.uint8),
+        get_text(f"For {name}", PATH_TO_FONT, 30, (60, 512), (10, 5)),
+        np.zeros((1, 512), dtype=np.uint8),
+        get_white_image((20, 512)),
+        build_drawing_area_with_aruco_markers(
+            (0, ids[0], ids[1], ids[2]),
+            drawing_area_size=200,
+            marker_size=144,
+            addl_left=load_draw_here(),
+            addl_top=np.vstack([
+                load_prev_label(),
+                prev_image[-10:, :],
+            ]),
+            addl_bottom=load_final_notice(),
+        ),
+    ])

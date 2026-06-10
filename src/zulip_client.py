@@ -39,6 +39,24 @@ class ZulipClient:
 
         return email
 
+    def get_name_for_user(self, user_id: int) -> str | None:
+        result = self.__client__.get_user_by_id(user_id)
+
+        if not result:
+            return None
+
+        user_data = result.get("user")
+
+        if not user_data:
+            return None
+
+        name = user_data.get("full_name")
+
+        if not name:
+            return None  # maybe error / complain?
+
+        return name
+
     def get_image(self, relative_image_url: str) -> bytes:
         full_url = f"{self.__host__}/{relative_image_url}"
 
