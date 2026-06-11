@@ -1,12 +1,17 @@
+from io import BytesIO
 import datetime
 import math
 import sqlite3
+from PIL import Image
+
+import form_parser
+import config
 
 def now_timestamp_s():
     return int(datetime.datetime.now().timestamp())
 
 def get_connection() -> sqlite3.Connection:
-    return sqlite3.connect("./test.db")
+    return sqlite3.connect(config.DB_URI)
 
 
 def setup(conn: sqlite3.Connection):
@@ -25,10 +30,13 @@ def setup(conn: sqlite3.Connection):
             drawingNumber INTEGER NOT NULL,
             artistZulipId INTEGER NOT NULL,
             imageData BLOB,
+            imageWidth INTEGER,
+            imageHeight INTEGER,
             createdAt INTEGER NOT NULL,
             submittedAt INTEGER
         );
     """)
+
 
 def convert_drawing_id_from_db_to_form(db_id: int) -> tuple[int, int, int]:
     hundreds_place = 0
@@ -89,6 +97,41 @@ def get_drawing(conn: sqlite3.Connection, drawing_id: int):
     return res.fetchone()
 
 
+def get_drawing_is_submitted(conn: sqlite3.Connection, drawing_id: int):
+    res = conn.execute(
+        """
+        SELECT submittedAt IS NOT NULL
+        FROM drawing
+        WHERE id = ?;
+        """,
+        (drawing_id, ),
+    )
+    record = res.fetchone()
+    if record is None:
+        return False
+
+    return record[0]
+
+
+def get_submitted_image(conn: sqlite3.Connection, drawing_id: int) -> Image.Image | None:
+    res = conn.execute(
+        """
+        SELECT imageData
+        FROM drawing
+        WHERE id = ?;
+        """,
+        (drawing_id, ),
+    )
+    row = res.fetchone()
+
+    if row is None:
+        return None
+
+    image_bytes = row[0]
+
+    return Image.open(BytesIO(image_bytes))
+
+
 def get_game_is_complete(conn: sqlite3.Connection, game_id: int):
     res = conn.execute(
         """
@@ -114,17 +157,20 @@ def get_game_is_complete(conn: sqlite3.Connection, game_id: int):
     return record[0] == record[1]
 
 
-def get_all_drawings_for_game(conn: sqlite3.Connection, game_id: int) -> list[bytes]:
+def get_all_drawings_for_game(conn: sqlite3.Connection, game_id: int) -> list[tuple[Image.Image, int]]:
     res = conn.execute(
         """
-        SELECT drawing.imageData
+        SELECT imageData, artistZulipId
         FROM drawing
         WHERE drawing.gameId = ?;
         """,
         (game_id, ),
     )
 
-    return [x[0] for x in res.fetchall()]
+    return [
+        (Image.open(BytesIO(row[0])), row[1])
+        for row in res.fetchall()
+    ]
 
 
 def get_game_id_for_drawing(conn: sqlite3.Connection, drawing_id: int) -> int:
@@ -148,14 +194,61 @@ def get_games_for_user(conn: sqlite3.Connection, user_id: int):
             game
                 LEFT JOIN
             drawing
-                WHERE
+                ON
             game.id = drawing.gameId
         WHERE
-            artistZulipId = ?;
+            drawing.artistZulipId = ?;
         """,
-        (user_id, )
+        (user_id, ),
     )
-    return []
+    return [x[0] for x in res.fetchall()]
+
+
+def get_progress_for_game(
+    conn: sqlite3.Connection,
+    game_id: int,
+) -> tuple[int, int] | None:
+    res = conn.execute(
+        """
+        SELECT
+            SUM(
+                CASE WHEN drawing.submittedAt IS NOT NULL
+                THEN 1 ELSE 0 END
+            ) AS numSubmitted,
+            game.length AS numTotal
+        FROM
+            game
+                LEFT JOIN
+            drawing
+                ON
+            game.id = drawing.gameId
+        WHERE
+            drawing.gameId = ?
+        ;
+        """,
+        (game_id, ),
+    )
+    return res.fetchone()
+
+
+def get_next_artist_for_game(
+    conn: sqlite3.Connection,
+    game_id: int,
+) -> int | None:
+    res = conn.execute(
+        """
+        SELECT
+            artistZulipid
+        FROM
+            drawing
+        WHERE
+            submittedAt IS NULL AND
+            gameId = ? 
+        ORDER BY id
+        """,
+        (game_id, ),
+    )
+    return res.fetchone()[0]
 
 
 def get_next_drawing_for_game(conn: sqlite3.Connection, game_id: int):
@@ -163,7 +256,8 @@ def get_next_drawing_for_game(conn: sqlite3.Connection, game_id: int):
         """
         SELECT
             id,
-            artistZulipId
+            artistZulipId,
+            drawingNumber
         FROM drawing
         WHERE
             gameId = ? AND
@@ -177,7 +271,7 @@ def get_next_drawing_for_game(conn: sqlite3.Connection, game_id: int):
     if not record:
         raise Exception("No next artist found")
 
-    return { "id": record[0], "artist_zulip_id": record[1] }
+    return { "id": record[0], "artist_zulip_id": record[1], "drawing_number": record[2]}
 
 
 def get_drawing_by_game_id_and_drawing_number(conn: sqlite3.Connection, game_id: int, drawing_number: int):
@@ -189,7 +283,12 @@ def get_drawing_by_game_id_and_drawing_number(conn: sqlite3.Connection, game_id:
         """,
         (game_id, drawing_number),
     )
-    return res.fetchone()
+    record = res.fetchone()
+
+    if not record:
+        raise Exception("No drawing found")
+
+    return record[0]
 
 
 def get_next_drawing_number(conn: sqlite3.Connection, game_id: int) -> int:
@@ -200,6 +299,7 @@ def get_next_drawing_number(conn: sqlite3.Connection, game_id: int) -> int:
         FROM
             drawing
         WHERE
+            submittedAt IS NULL AND
             gameId = ?;
         """,
         (game_id, ),
@@ -245,6 +345,16 @@ def init_drawing(
     artist_zulip_id: int,
 ) -> int:
     next_drawing_number = get_next_drawing_number(conn, game_id)
+
+    existing_drawing_id = None
+    try:
+        record = get_drawing_by_game_id_and_drawing_number(conn, game_id, next_drawing_number)
+        existing_drawing_id = record[0]
+    except Exception:
+        pass
+
+    if existing_drawing_id:
+        return existing_drawing_id
     
     res = conn.execute(
         """
@@ -263,7 +373,7 @@ def init_drawing(
 def submit_drawing(
     conn: sqlite3.Connection,
     drawing_id: int,
-    image_data: bytes,
+    image_bytes: bytes,
 ) -> None:
     conn.execute(
         """
@@ -275,7 +385,7 @@ def submit_drawing(
         WHERE
             id = ?;
         """,
-        (image_data, now_timestamp_s(), drawing_id),
+        (image_bytes, now_timestamp_s(), drawing_id),
     )
     conn.commit()
 

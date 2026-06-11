@@ -1,8 +1,12 @@
+from io import BytesIO
 import re
 import typing as t
 from urllib import parse as urlparse
+from PIL import Image
 
 from zulip import Client
+
+from form_parser import convert_pil_to_jpeg_fobj
 
 ZulipMessage = dict[str, t.Any]
 
@@ -68,6 +72,18 @@ class ZulipClient:
         response.raise_for_status()
 
         return response.content
+
+    def upload_image(self, im: Image.Image) -> str:
+        fobj = convert_pil_to_jpeg_fobj(im)
+        fobj.name = 'tempImageUpload.jpeg'
+        result = self.__client__.upload_file(fobj)
+
+        url = result["url"]
+
+        if url is None:
+            raise ZulipClientException("upload did not return url")
+
+        return url
 
 
 #############################

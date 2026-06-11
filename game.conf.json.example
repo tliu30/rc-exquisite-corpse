@@ -1,0 +1,5 @@
+{
+    "DB_URI": "some-file-path-or-other-uri",
+    "FONT_PATH": "/System/Library/Fonts/Supplemental/Arial.ttf"
+}
+

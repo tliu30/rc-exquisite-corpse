@@ -1,14 +1,15 @@
+import os
 from io import BytesIO
 import numpy as np
 import cv2
 from PIL import Image
 from PIL import ImageDraw
 from PIL import ImageFont
-
+import consts
+import config
 
 MAX_WIDTH = 512  # Receipt printer handles images up to 512 pixels wide
 ARUCO_DICT = cv2.aruco.getPredefinedDictionary(cv2.aruco.DICT_4X4_1000)
-PATH_TO_FONT = "/Library/Fonts/Arial Unicode.ttf"
 
 
 def get_white_image(size: tuple[int, int]) -> np.ndarray:
@@ -25,40 +26,9 @@ def get_marker(i: int, size: int) -> np.ndarray:
     return cv2.aruco.generateImageMarker(ARUCO_DICT, i, size)
 
 
-def crop_and_center(im: np.ndarray) -> np.ndarray:
-    """Only for black and white image arrays; assumed grayscale"""
-    black_mask = (im == 0)
-
-    def first_black_pixel(mask: np.ndarray, axis: int) -> int:
-        ixes = mask.argmax(axis=axis)
-        return ixes[ixes > 0].min()
-
-    margins = (
-        first_black_pixel(black_mask, 1), # left
-        first_black_pixel(black_mask[:, ::-1], 1),  # right
-        first_black_pixel(black_mask, 0),  # top
-        first_black_pixel(black_mask[::-1, :], 0),  # bottom
-    )
-
-    cropped_im = im[
-        margins[2]:(im.shape[0] - margins[3]),
-        margins[0]:(im.shape[1] - margins[1]),
-    ]
-
-    new_margin_x = (MAX_WIDTH - cropped_im.shape[1]) / 2
-    new_margin_left = int(np.floor(new_margin_x))
-    new_margin_right = int(np.ceil(new_margin_x))
-
-    return np.hstack([
-        get_white_image((cropped_im.shape[0], new_margin_left)),
-        cropped_im,
-        get_white_image((cropped_im.shape[0], new_margin_right)),
-    ])
-
-
 def build_drawing_area(
-    drawing_area_size: int = 400,
-    border_width: int = 3,
+    drawing_area_size: int,
+    border_width: int,
 ) -> np.ndarray:
     """Note: drawing area is square"""
     if drawing_area_size + 2 * border_width > MAX_WIDTH:
@@ -94,27 +64,26 @@ def build_drawing_area(
 
 def build_drawing_area_with_aruco_markers(
     ids: tuple[int, int, int, int],
-    drawing_area_size: int = 400,
-    border_width: int = 3,
-    marker_size: int = 48,
+    drawing_area_size: int = consts.DRAWING_AREA,
+    border_width: int = consts.BORDER_WIDTH,
+    marker_size: int = consts.MARKER_SIZE,
+    marker_margin: int = consts.MARKER_MARGIN,
     addl_left: np.ndarray | None = None,
     addl_top: np.ndarray | None = None,
     addl_bottom: np.ndarray | None = None,
 ) -> np.ndarray:
-    MARKER_MARGIN = 4
-
     if drawing_area_size + 2 * border_width + 2 * marker_size > MAX_WIDTH:
         raise ValueError(f"Change dimensions: too big (max width {MAX_WIDTH}px)")
 
     # Prepend and append white space to add markers to
     im = np.vstack([
-        get_white_image((marker_size + MARKER_MARGIN, MAX_WIDTH)),
-        build_drawing_area(drawing_area_size=drawing_area_size, border_width=border_width),
-        get_white_image((marker_size + MARKER_MARGIN, MAX_WIDTH)),
+        get_white_image((marker_size + marker_margin, MAX_WIDTH)),
+        build_drawing_area(drawing_area_size, border_width),
+        get_white_image((marker_size + marker_margin, MAX_WIDTH)),
     ])
 
     # Margin on the left and right sides of drawing area
-    margin_x = (MAX_WIDTH - drawing_area_size - 2 * border_width - 2 * MARKER_MARGIN) / 2
+    margin_x = (MAX_WIDTH - drawing_area_size - 2 * border_width - 2 * marker_margin) / 2
     if margin_x != int(margin_x):
         raise ValueError("Choose dimensions: x dimension must have integer margin")
 
@@ -152,7 +121,7 @@ def build_drawing_area_with_aruco_markers(
 
     if addl_left is not None:
         cur_h, cur_w = addl_left.shape
-        top = marker_size + MARKER_MARGIN + border_width
+        top = marker_size + marker_margin + border_width
         right = margin_x
         bottom = top + cur_h
         left = right - cur_w
@@ -161,8 +130,8 @@ def build_drawing_area_with_aruco_markers(
 
     if addl_top is not None:
         cur_h, cur_w = addl_top.shape
-        bottom = marker_size + MARKER_MARGIN
-        left = margin_x + MARKER_MARGIN + border_width
+        bottom = marker_size + marker_margin
+        left = margin_x + marker_margin + border_width
         top = bottom - cur_h
         right = left + cur_w
         
@@ -170,8 +139,8 @@ def build_drawing_area_with_aruco_markers(
 
     if addl_bottom is not None:
         cur_h, cur_w = addl_bottom.shape
-        top = full_height - marker_size - MARKER_MARGIN
-        left = margin_x + MARKER_MARGIN + border_width
+        top = full_height - marker_size - marker_margin
+        left = margin_x + marker_margin + border_width
 
         bottom = top + cur_h
         right = left + cur_w
@@ -195,90 +164,41 @@ def get_text(text: str, path_to_font_ttf: str, font_size: int, canvas_size: tupl
     return np.array(canvas)
 
 
-def build_title(text: str, path_to_font_ttf: str, font_size: int) -> np.ndarray:
-    canvas = Image.fromarray(get_white_image((512, 512)))
-
-    im_draw = ImageDraw.Draw(canvas)
-    im_draw.text(
-        (0, 0),
-        text,
-        font=ImageFont.truetype(path_to_font_ttf, font_size),
-        fill=(0,)
-    )
-
-    im = np.array(canvas)
-
-    return crop_and_center(im)
-
-
-def build_titled_card(text: str, path_to_font_ttf: str, ids: tuple[int,int,int]) -> np.ndarray:
-    # "/System/Library/Fonts/Supplemental/Arial.ttf",
-    title = build_title(text, path_to_font_ttf, 90)
-    drawing_card = build_drawing_area_with_aruco_markers(
-        (0, ids[0], ids[1], ids[2]),
-        drawing_area_size=200,
-        marker_size=144,
-    )
-
-    full_img = np.vstack([
-        title,
-        get_white_image((20, MAX_WIDTH)),
-        drawing_card,
-    ])
-
-    return full_img
-
-def get_completed_game(images: list[bytes]) -> np.ndarray:
-    return np.vstack([
-        np.array(
-            Image
-            .frombytes("RGB", (512, 512), x)
-            .resize((256, 256))
-        ) for x in images
-    ] * 3)
-
-
-import os
-PROJECT_ROOT = "/Users/anthonyliu/Projects/receipt-printer-exquisite-corpse/"
-
-
 def load_title() -> np.ndarray:
-    path = os.path.join(PROJECT_ROOT, "./src/assets/title.jpeg")
+    path = os.path.join(config.PROJECT_ROOT, "./src/assets/title.jpeg")
     return np.array(Image.open(path).convert(mode="L"))
 
 
 def load_draw_here() -> np.ndarray:
-    path = os.path.join(PROJECT_ROOT, "./src/assets/draw-instructions.jpeg")
+    path = os.path.join(config.PROJECT_ROOT, "./src/assets/draw-instructions.jpeg")
     return np.array(Image.open(path).convert(mode="L"))
 
 
 def load_prev_label() -> np.ndarray:
-    path = os.path.join(PROJECT_ROOT, "./src/assets/prev-drawing.jpeg")
+    path = os.path.join(config.PROJECT_ROOT, "./src/assets/prev-drawing.jpeg")
     return np.array(Image.open(path).convert(mode="L"))
 
 def load_youre_the_first() -> np.ndarray:
-    path = os.path.join(PROJECT_ROOT, "./src/assets/first.jpeg")
+    path = os.path.join(config.PROJECT_ROOT, "./src/assets/first.jpeg")
     return np.array(Image.open(path).convert(mode="L"))
 
 def load_bottom_reminder() -> np.ndarray:
-    path = os.path.join(PROJECT_ROOT, "./src/assets/bottom.jpeg")
+    path = os.path.join(config.PROJECT_ROOT, "./src/assets/bottom.jpeg")
     return np.array(Image.open(path).convert(mode="L"))
 
 def load_final_notice() -> np.ndarray:
-    path = os.path.join(PROJECT_ROOT, "./src/assets/final.jpeg")
+    path = os.path.join(config.PROJECT_ROOT, "./src/assets/final.jpeg")
     return np.array(Image.open(path).convert(mode="L"))
 
 def build_start_form(ids: tuple[int, int, int], name: str):
     return np.vstack([
         load_title(),
-        np.zeros((1, 512), dtype=np.uint8),
-        get_text(f"For {name}", PATH_TO_FONT, 30, (60, 512), (10, 5)),
-        np.zeros((1, 512), dtype=np.uint8),
-        get_white_image((20, 512)),
+        np.zeros((1, MAX_WIDTH), dtype=np.uint8),
+        get_text(f"For {name}", config.FONT_PATH, 30, (60, MAX_WIDTH), (10, 5)),
+        np.zeros((1, MAX_WIDTH), dtype=np.uint8),
+        get_white_image((20, MAX_WIDTH)),
         build_drawing_area_with_aruco_markers(
             (0, ids[0], ids[1], ids[2]),
-            drawing_area_size=200,
-            marker_size=144,
             addl_left=load_draw_here(),
             addl_top=load_youre_the_first(),
             addl_bottom=load_bottom_reminder(),
@@ -289,14 +209,12 @@ def build_start_form(ids: tuple[int, int, int], name: str):
 def build_middle_form(ids: tuple[int, int, int], name: str, prev_image: np.ndarray):
     return np.vstack([
         load_title(),
-        np.zeros((1, 512), dtype=np.uint8),
-        get_text(f"For {name}", PATH_TO_FONT, 30, (60, 512), (10, 5)),
-        np.zeros((1, 512), dtype=np.uint8),
-        get_white_image((20, 512)),
+        np.zeros((1, MAX_WIDTH), dtype=np.uint8),
+        get_text(f"For {name}", config.FONT_PATH, 30, (60, MAX_WIDTH), (10, 5)),
+        np.zeros((1, MAX_WIDTH), dtype=np.uint8),
+        get_white_image((20, MAX_WIDTH)),
         build_drawing_area_with_aruco_markers(
             (0, ids[0], ids[1], ids[2]),
-            drawing_area_size=200,
-            marker_size=144,
             addl_left=load_draw_here(),
             addl_top=np.vstack([
                 load_prev_label(),
@@ -309,14 +227,12 @@ def build_middle_form(ids: tuple[int, int, int], name: str, prev_image: np.ndarr
 def build_final_form(ids: tuple[int, int, int], name: str, prev_image: np.ndarray):
     return np.vstack([
         load_title(),
-        np.zeros((1, 512), dtype=np.uint8),
-        get_text(f"For {name}", PATH_TO_FONT, 30, (60, 512), (10, 5)),
-        np.zeros((1, 512), dtype=np.uint8),
-        get_white_image((20, 512)),
+        np.zeros((1, MAX_WIDTH), dtype=np.uint8),
+        get_text(f"For {name}", config.FONT_PATH, 30, (60, MAX_WIDTH), (10, 5)),
+        np.zeros((1, MAX_WIDTH), dtype=np.uint8),
+        get_white_image((20, MAX_WIDTH)),
         build_drawing_area_with_aruco_markers(
             (0, ids[0], ids[1], ids[2]),
-            drawing_area_size=200,
-            marker_size=144,
             addl_left=load_draw_here(),
             addl_top=np.vstack([
                 load_prev_label(),
@@ -325,3 +241,65 @@ def build_final_form(ids: tuple[int, int, int], name: str, prev_image: np.ndarra
             addl_bottom=load_final_notice(),
         ),
     ])
+
+
+
+def get_annotated_image(im: np.ndarray, annotation: str) -> np.ndarray:
+    # Assumes grayscale
+    im_h, _ = im.shape[:2]
+
+    text_array = get_text(annotation, config.FONT_PATH, 28, (50, 1000), (0, 0))
+    text_h, text_w = text_array.shape[:2]
+
+    is_black = text_array < 255
+    
+    x_0 = is_black.max(axis=0).tolist().index(True)
+    x_1 = text_w - is_black.max(axis=0)[::-1].tolist().index(True) 
+
+    if x_1 - x_0 < im_h:
+        x_1 = x_0 + im_h 
+    
+    cropped_text_array = text_array[
+        :,
+        np.clip(x_0 - 20, 0, text_w):np.clip(x_1 + 20, 0, text_w),
+    ]
+
+
+    cropped_text = (
+        Image.fromarray(cropped_text_array)
+        .transpose(Image.Transpose.ROTATE_270)
+        .resize((text_h, im_h))
+    )
+
+    return np.hstack([im, np.array(cropped_text)])
+
+
+def get_completed_game(
+    images: list[Image.Image],
+    annotations: list[str],
+) -> np.ndarray:
+    if not images:
+        return np.array([])
+
+    annotated_images = []
+    for image, annotation in zip(images, annotations):
+        image_array = np.array(image.resize((250, 250)))
+        annotated_image = get_annotated_image(image_array, annotation)
+        annotated_images.append(annotated_image)
+
+    section_width = annotated_images[0].shape[1]
+
+    title = load_title()
+    title_h, title_w = title.shape
+    ratio = section_width / title_w
+    new_h = int(title_h * ratio)
+    new_w = int(title_w * ratio)
+    resized_title = np.array(Image.fromarray(load_title()).resize((new_w, new_h)))
+
+    return np.vstack([
+        resized_title,
+        get_white_image((20, section_width)),
+        *annotated_images,
+    ])
+
+

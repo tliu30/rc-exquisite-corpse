@@ -1,0 +1,7 @@
+# Configuration, for consistent parsing and loading
+DRAWING_AREA = 200
+MARKER_SIZE = 144
+MARKER_MARGIN = 4
+BORDER_WIDTH = 3
+
+DRAWING_AREA_PLUS = DRAWING_AREA + (BORDER_WIDTH + MARKER_MARGIN) * 2

@@ -16,20 +16,30 @@ class FormParserException(Exception):
 def convert_pil_to_opencv(img: Image.Image) -> np.ndarray:
     """To convert from PIL format to opencv, need to reverse color channels"""
     as_array = np.array(img)  # RGB
-    return as_array[:, :, ::-1]  # now, BGR
+    if len(as_array.shape) > 2:
+        return as_array[:, :, ::-1]  # now, BGR
+    else:
+        return as_array
 
 
 def convert_opencv_to_pil(img: np.ndarray) -> Image.Image:
     """To convert from opencv to PIL format, need to reverse color channels"""
-    return Image.fromarray(img[:, :, ::-1])  # BGR => RGB
+    if len(img.shape) > 2:
+        return Image.fromarray(img[:, :, ::-1])  # BGR => RGB
+    else:
+        return Image.fromarray(img)
 
 
-def get_opencv_image_from_bytes(b: bytes) -> np.ndarray:
-    return convert_pil_to_opencv(Image.open(BytesIO(b)))
+def convert_pil_to_jpeg_fobj(im: Image.Image) -> BytesIO:
+    fobj = BytesIO()
+    im.save(fobj, format="jpeg")
+    fobj.seek(0)
+    return fobj
 
 
-def convert_opencv_image_to_bytes(img: np.ndarray) -> bytes:
-    return convert_opencv_to_pil(img).tobytes()
+def convert_opencv_image_to_jpeg_bytes(img: np.ndarray) -> bytes:
+    fobj = convert_pil_to_jpeg_fobj(convert_opencv_to_pil(img))
+    return fobj.read()
 
 
 def detect_markers(image: np.ndarray) -> list[tuple[np.ndarray, np.ndarray]]:
@@ -135,20 +145,20 @@ def reorder_markers(markers: list[tuple[np.ndarray, np.ndarray]]) -> list[tuple[
     return list(zip(sorted_labels, sorted_corners))
 
 
-def parse_form(image: np.ndarray, transformed_size: int) -> tuple[np.ndarray, list[int]]:
+def parse_form(image: np.ndarray, transformed_size: int, addl_crop: int = 0) -> tuple[np.ndarray, list[int]]:
     """Can still fail"""
-    # Convert to grayscale, and feed to the detector
-    as_grayscale = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+    if len(image.shape) > 2:
+        raise Exception("Found a color channel on image; must be grayscale")
 
     # Get markers, retrying at slightly different rotations if unsuccessful
     markers: list[tuple[np.ndarray, np.ndarray]] = []
-    mod_image = as_grayscale.copy()
+    mod_image = image.copy()
     marker_tl_found = False    # for debugging
     any_markers_found = False  # for debugging
     max_num_markers_found = -1 # for debugging
     for rotation_deg in [0, 15, 30, 45, -15, -30, -45]:
         if rotation_deg:
-            mod_image = rotate_image(as_grayscale, rotation_deg)
+            mod_image = rotate_image(image, rotation_deg)
         markers = detect_markers(mod_image)
 
         max_num_markers_found = max(len(markers), max_num_markers_found)
@@ -209,9 +219,19 @@ def parse_form(image: np.ndarray, transformed_size: int) -> tuple[np.ndarray, li
     if rotation_deg:
         image = rotate_image(image, rotation_deg)
     image = fix_rotation_given_marker(image, label_0_corners)
-    return cv2.warpPerspective(
+
+    transformed_image = cv2.warpPerspective(
         image,
         transformation,
         (transformed_size, transformed_size),
-    ), [x.item() for x in labels]
+    )
+
+    # Apply the additional crop
+    t_h, t_w = transformed_image.shape[:2]
+    transformed_image = transformed_image[
+        addl_crop:(t_h - addl_crop),
+        addl_crop:(t_w - addl_crop),
+    ]
+
+    return transformed_image, [x.item() for x in labels]
 
