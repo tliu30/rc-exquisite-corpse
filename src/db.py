@@ -172,6 +172,17 @@ def get_all_drawings_for_game(conn: sqlite3.Connection, game_id: int) -> list[tu
         for row in res.fetchall()
     ]
 
+def get_all_participant_ids(conn: sqlite3.Connection, game_id: int) -> set[int]:
+    res = conn.execute(
+        """
+        SELECT DISTINCT artistZulipId
+        FROM drawing
+        WHERE drawing.gameId = ?
+        """,
+        (game_id, ),
+    )
+
+    return set(x[0] for x in res.fetchall())
 
 def get_game_id_for_drawing(conn: sqlite3.Connection, drawing_id: int) -> int:
     res = conn.execute(

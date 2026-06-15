@@ -227,11 +227,26 @@ Once you're done, reply to me with the `/submit` command, uploading a picture of
                 form_parser.convert_opencv_image_to_jpeg_bytes(parsed_drawing),
             )
 
-            # Also send a message to every other player...
-            bot_handler.send_reply(
-                message,
-                "Success! Thanks for submitting. The game is done and ready to print (use `/print`)!"
-            )
+            game_id = db.get_game_id_for_drawing(conn, drawing_db_id)
+            participant_ids = db.get_all_participant_ids(conn, game_id)
+
+            for zulip_id in participant_ids:
+                if zulip_id == message.get("sender_id"):
+                    bot_handler.send_reply(
+                        message,
+                        f"Success! Thanks for submitting. Game {game_id} is done and ready to print (use `/print`)!"
+                    )
+                else:
+                    participant_email = ZULIP_CLIENT.get_email_for_user(zulip_id)
+                    if not participant_email:
+                        continue
+
+                    bot_handler.send_message({
+                        "type": "private",
+                        "to": participant_email,
+                        "subject": "A game has been completed!",
+                        "content": f"Game {game_id} is done! Use `/print` to print it out :)",
+                    })
 
         return
 

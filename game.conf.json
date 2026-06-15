@@ -1,5 +1,5 @@
 {
-    "DB_URI": "./test-other.db",
+    "DB_URI": "./local.db",
     "FONT_PATH": "/System/Library/Fonts/Supplemental/Arial.ttf"
 }
 
