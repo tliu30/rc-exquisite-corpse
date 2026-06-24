@@ -1,4 +1,6 @@
 import logging
+import datetime
+import math
 from io import BytesIO
 import image_builder
 import typing as t
@@ -32,6 +34,8 @@ HELP_MESSAGE = """Hi, I'm the RC Exquisite Corpse game bot - thanks for playing!
 - `/list` - list the games that you are part of
 - `/help` - show this message
 
+You can also visit [the gallery](https://anthonys-macbook-pro.tail93cbbf.ts.net/gallery/) to see completed games!
+
 **How to play**
 
 In an exquisite corpse game, players create a collaborative work of art. Each player continues from where the last artist left off - but they don't get to see what the last artist drew, making for fun surprises.
@@ -48,6 +52,9 @@ with db.get_connection() as conn:
 
 RCPRINTER_CLIENT = rcprinter_client.RCPrinterClient(conf_path=config.RCPRINTER_CONF_PATH)
 ZULIP_CLIENT = ZulipClient(config.ZULIP_CONF_PATH)
+
+
+PRINT_THROTTLE: dict[int, float] = {}
 
 
 class GameBotHandler:
@@ -72,9 +79,26 @@ class GameBotHandler:
             bot_handler.send_reply(message, "Error: Could not get name for sender")
             return
 
+        parts = message.get("content", "").strip().split(" ")
+        if len(parts) > 2:
+            bot_handler.send_reply(message, "Error: Usage is `/start {n_games}` (too many args)")
+            return
+
+        length = 3
+        if len(parts) == 2:
+            try:
+                length = int(parts[1])
+            except Exception:
+                bot_handler.send_reply(message, f"Error: Usage is `/start {{n_games}}` (failed to parse {parts[1]})")
+                return
+            
+            if length < 0:
+                bot_handler.send_reply(message, f"Error: Usage is `/start {{n_games}}` (arg must be positive; found {length})")
+                return
+
         conn = self._get_connection()
 
-        game_id = db.create_game(conn, sender_id, length=3)
+        game_id = db.create_game(conn, sender_id, length=length)
         drawing_id = db.init_drawing(conn, game_id, sender_id)
         logger.info(f"Created game {game_id} and drawing {drawing_id}")
 
@@ -314,14 +338,21 @@ Once you're done, reply to me with the `/submit` command, uploading a picture of
             bot_handler.send_reply(message, "Error: Could not get name for sender")
             return
 
-        conn = self._get_connection()
         game_id = int(args[1])
+        now = datetime.datetime.now().timestamp()
+        prev = PRINT_THROTTLE.get(game_id)
+        if prev and (now - prev) < 30:
+            bot_handler.send_reply(message, "Error: throttled; wait a few seconds and try again")
+            return
+        PRINT_THROTTLE[game_id] = now
+
+        conn = self._get_connection()
         is_complete = db.get_game_is_complete(conn, game_id)
 
         if is_complete:
             all_drawings_with_ids = db.get_all_drawings_for_game(conn, game_id)
             all_drawings = [x for x, _ in all_drawings_with_ids]
-            all_names = [ZULIP_CLIENT.get_name_for_user(x) or "(unknown" for _, x in all_drawings_with_ids]
+            all_names = [ZULIP_CLIENT.get_name_for_user(x) or "(unknown)" for _, x in all_drawings_with_ids]
             form = image_builder.get_completed_game(all_drawings, all_names)
         else:
             next_drawing_data = db.get_next_drawing_for_game(conn, game_id)
@@ -357,6 +388,7 @@ Once you're done, reply to me with the `/submit` command, uploading a picture of
                 bot_handler.send_reply(message, "This game is incomplete, and you are not next, so you may not print this form!")
                 return
 
+        bot_handler.send_reply(message, f"Processing...")
         img = form_parser.convert_opencv_to_pil(form)
         RCPRINTER_CLIENT.send_image(img)
 
@@ -400,5 +432,159 @@ Once you're done, reply to me with the `/submit` command, uploading a picture of
 
             case _:
                 return self.show_help(message, bot_handler)
+
+
+from urllib.parse import urlparse
+
+from flask import Response, abort, render_template_string, request
+
+from zulip_botserver.server import app
+
+GALLERY_PAGE_SIZE = 10
+
+# Completed games are immutable, so their composite images can be cached for a day.
+GALLERY_IMAGE_CACHE_SECONDS = 86400
+
+GALLERY_TEMPLATE = """
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>RC Exquisite Corpse Gallery</title>
+  <style>
+    body { font-family: system-ui, sans-serif; margin: 0 auto; max-width: 720px; padding: 1.5rem; }
+    h1 { text-align: center; }
+    .game { margin: 2rem 0; text-align: center; }
+    .game img { max-width: 100%; height: auto; border: 1px solid #ddd; }
+    .meta { color: #666; font-size: 0.9rem; margin-top: 0.5rem; }
+    .pager { display: flex; justify-content: space-between; align-items: center; margin: 2rem 0; }
+    .pager a { text-decoration: none; padding: 0.5rem 1rem; border: 1px solid #ccc; border-radius: 4px; }
+    .pager span.disabled { padding: 0.5rem 1rem; border: 1px solid #eee; border-radius: 4px; color: #bbb; }
+    .empty { text-align: center; color: #666; margin: 4rem 0; }
+  </style>
+</head>
+<body>
+  <h1>RC Exquisite Corpse Gallery</h1>
+  {% if games %}
+    {% for game in games %}
+      <div class="game">
+        <img src="/gallery/games/{{ game.id }}/image" loading="lazy"
+             alt="Completed game #{{ game.id }}">
+        <div class="meta">Game #{{ game.id }} &middot; completed {{ game.completed_at }}</div>
+      </div>
+    {% endfor %}
+    <div class="pager">
+      {% if page > 1 %}
+        <a href="/gallery/?page={{ page - 1 }}">&larr; Newer</a>
+      {% else %}
+        <span class="disabled">&larr; Newer</span>
+      {% endif %}
+      <span>Page {{ page }} of {{ total_pages }}</span>
+      {% if page < total_pages %}
+        <a href="/gallery/?page={{ page + 1 }}">Older &rarr;</a>
+      {% else %}
+        <span class="disabled">Older &rarr;</span>
+      {% endif %}
+    </div>
+  {% else %}
+    <p class="empty">No completed games yet. Check back once a game wraps up!</p>
+  {% endif %}
+</body>
+</html>
+"""
+
+
+def _format_completed_at(timestamp: int | None) -> str:
+    if timestamp is None:
+        return "unknown"
+    return datetime.datetime.fromtimestamp(timestamp).strftime("%Y-%m-%d %H:%M")
+
+
+@app.route("/gallery/", methods=["GET"])
+def gallery() -> str:
+    try:
+        page = int(request.args.get("page", 1))
+    except ValueError:
+        page = 1
+    page = max(page, 1)
+
+    conn = db.get_connection()
+    try:
+        total = db.count_completed_games(conn)
+        total_pages = max(math.ceil(total / GALLERY_PAGE_SIZE), 1)
+        page = min(page, total_pages)
+        offset = (page - 1) * GALLERY_PAGE_SIZE
+        rows = db.get_completed_games(conn, GALLERY_PAGE_SIZE, offset)
+    finally:
+        conn.close()
+
+    games = [
+        {"id": game_id, "completed_at": _format_completed_at(completed_at)}
+        for (game_id, completed_at) in rows
+    ]
+
+    return render_template_string(
+        GALLERY_TEMPLATE,
+        games=games,
+        page=page,
+        total_pages=total_pages,
+    )
+
+
+def _is_same_origin_request() -> bool:
+    """
+    Best-effort same-origin gate for the image endpoint.
+
+    Modern browsers send `Sec-Fetch-Site: same-origin` for an <img> whose src is on
+    the same origin as the gallery page, and `none` for direct address-bar
+    navigation. We fall back to comparing the Referer host with the request host for
+    clients that don't send fetch-metadata. Headers are spoofable, so this only
+    blocks casual cross-site hotlinking / direct hits, not a determined caller.
+    """
+    fetch_site = request.headers.get("Sec-Fetch-Site")
+    if fetch_site is not None:
+        return fetch_site in ("same-origin", "same-site")
+
+    referer = request.headers.get("Referer")
+    if not referer:
+        return False
+    return urlparse(referer).netloc == request.host
+
+
+@app.route("/gallery/games/<int:game_id>/image", methods=["GET"])
+def gallery_game_image(game_id: int) -> Response:
+    if not _is_same_origin_request():
+        abort(403)
+
+    conn = db.get_connection()
+    try:
+        if not db.get_game_is_complete(conn, game_id):
+            abort(404)
+
+        drawings_with_ids = db.get_all_drawings_for_game(conn, game_id)
+    finally:
+        conn.close()
+
+    if not drawings_with_ids:
+        abort(404)
+
+    images = [image for image, _ in drawings_with_ids]
+    name_cache: dict[int, str] = {}
+    names = []
+    for _, artist_id in drawings_with_ids:
+        if artist_id not in name_cache:
+            name_cache[artist_id] = ZULIP_CLIENT.get_name_for_user(artist_id) or "(unknown)"
+        names.append(name_cache[artist_id])
+
+    form = image_builder.get_completed_game(images, names)
+    jpeg_bytes = form_parser.convert_opencv_image_to_jpeg_bytes(form)
+
+    return Response(
+        jpeg_bytes,
+        mimetype="image/jpeg",
+        headers={"Cache-Control": f"public, max-age={GALLERY_IMAGE_CACHE_SECONDS}"},
+    )
+
 
 handler_class = GameBotHandler

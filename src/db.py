@@ -162,7 +162,8 @@ def get_all_drawings_for_game(conn: sqlite3.Connection, game_id: int) -> list[tu
         """
         SELECT imageData, artistZulipId
         FROM drawing
-        WHERE drawing.gameId = ?;
+        WHERE drawing.gameId = ?
+        ORDER BY drawing.drawingNumber;
         """,
         (game_id, ),
     )
@@ -399,5 +400,49 @@ def submit_drawing(
         (image_bytes, now_timestamp_s(), drawing_id),
     )
     conn.commit()
+
+
+def count_completed_games(conn: sqlite3.Connection) -> int:
+    """Count games where every drawing has been submitted."""
+    res = conn.execute(
+        """
+        SELECT COUNT(*) FROM (
+            SELECT game.id
+            FROM game JOIN drawing ON game.id = drawing.gameId
+            GROUP BY game.id, game.length
+            HAVING SUM(
+                CASE WHEN drawing.submittedAt IS NOT NULL THEN 1 ELSE 0 END
+            ) = game.length
+        );
+        """,
+    )
+    return res.fetchone()[0]
+
+
+def get_completed_games(
+    conn: sqlite3.Connection,
+    limit: int,
+    offset: int,
+) -> list[tuple[int, int]]:
+    """
+    Return (game_id, completed_at) for completed games, newest-completed first.
+
+    A game is complete when all of its `length` drawings have been submitted;
+    its completion time is the latest `submittedAt` across its drawings.
+    """
+    res = conn.execute(
+        """
+        SELECT game.id, MAX(drawing.submittedAt) AS completedAt
+        FROM game JOIN drawing ON game.id = drawing.gameId
+        GROUP BY game.id, game.length
+        HAVING SUM(
+            CASE WHEN drawing.submittedAt IS NOT NULL THEN 1 ELSE 0 END
+        ) = game.length
+        ORDER BY completedAt DESC
+        LIMIT ? OFFSET ?;
+        """,
+        (limit, offset),
+    )
+    return [(row[0], row[1]) for row in res.fetchall()]
 
 

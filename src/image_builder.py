@@ -283,7 +283,7 @@ def get_completed_game(
 
     annotated_images = []
     for image, annotation in zip(images, annotations):
-        image_array = np.array(image.resize((250, 250)))
+        image_array = np.array(image.resize((450, 450)))
         annotated_image = get_annotated_image(image_array, annotation)
         annotated_images.append(annotated_image)
 
