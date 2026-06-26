@@ -1,3 +1,8 @@
+import base64
+from cryptography.hazmat.primitives.asymmetric import ed25519
+from cryptography.hazmat.primitives.asymmetric.types import PrivateKeyTypes
+from cryptography.hazmat.primitives.serialization import load_pem_private_key
+
 from PIL import Image
 import json
 import requests
@@ -6,15 +11,25 @@ import time
 import config
 from form_parser import convert_pil_to_jpeg_fobj
 
+
+def load_key(key_as_str: str) -> ed25519.Ed25519PrivateKey:
+    key = load_pem_private_key(key_as_str.encode(), password=None)
+
+    if not isinstance(key, ed25519.Ed25519PrivateKey):
+        raise ValueError("Key must be of type ed25519")
+
+    return key
+
+
+def get_signature(private_key: ed25519.Ed25519PrivateKey, content: bytes) -> str:
+    as_bytes = private_key.sign(content)
+    return base64.b64encode(as_bytes).decode('ascii')
+
+
 class RCPrinterClient:
 
     def __init__(self):
-        self.cookies = {
-            "receipt_csrf": config.RCPRINTER_CSRF,
-            "session": config.RCPRINTER_SESSION,
-            "session.sig": config.RCPRINTER_SESSION_SIG,
-        }
-        self.csrf_token = config.RCPRINTER_CSRF
+        self.private_key = load_key(config.RCPRINTER_PRIVATE_KEY)
         self.base_url = "https://receipt.recurse.com"
 
     def send_image(self, image: Image.Image) -> None:
@@ -24,12 +39,12 @@ class RCPrinterClient:
         
         def _send(data: bytes, cut: bool) -> None:
             url = f"{self.base_url}/image?cut={1 if cut else 0}"
+            signature = get_signature(self.private_key, data)
             response = requests.post(
                 url,
                 data=data,
-                cookies=self.cookies,
                 headers={
-                    "X-CSRF-TOKEN": self.csrf_token,
+                    "Signature": signature,
                     "Content-Type": f"image/jpeg",
                 }
             )
