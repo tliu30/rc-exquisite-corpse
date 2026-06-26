@@ -224,7 +224,12 @@ def build_middle_form(ids: tuple[int, int, int], name: str, prev_image: np.ndarr
         ),
     ])
 
-def build_final_form(ids: tuple[int, int, int], name: str, prev_image: np.ndarray):
+def build_final_form(
+    ids: tuple[int, int, int],
+    name: str,
+    prev_image: np.ndarray,
+    first_image: np.ndarray,
+):
     return np.vstack([
         load_title(),
         np.zeros((1, MAX_WIDTH), dtype=np.uint8),
@@ -238,7 +243,10 @@ def build_final_form(ids: tuple[int, int, int], name: str, prev_image: np.ndarra
                 load_prev_label(),
                 prev_image[-10:, :],
             ]),
-            addl_bottom=load_final_notice(),
+            addl_bottom=np.vstack([
+                first_image[:10, :],
+                load_final_notice(),
+            ])
         ),
     ])
 

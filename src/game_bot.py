@@ -178,22 +178,40 @@ class GameBotHandler:
         is_final = db.get_drawing_is_final(conn, drawing_db_id)
         logger.info(f"Is final check: {is_final} for labels {labels} and drawing_db_id {drawing_db_id}")
         if not is_final:
+            game_id = db.get_game_id_for_drawing(conn, drawing_db_id)
+
+            # First, see if record already exists
+            next_drawing_number = db.get_next_drawing_number(conn, game_id)
+
+            next_drawing_id: int | None = None
+            next_user_id: int | None = None
+            try:
+                next_drawing_id = db.get_drawing_by_game_id_and_drawing_number(conn, game_id, next_drawing_number)
+                next_user_id = db.get_artist_id_for_drawing(conn, next_drawing_id)
+            except Exception:
+                logger.exception("/submit: Did not find next drawing; looking for mentioned user")
+                pass
+
             # Parse out mentioned user id, and get email so we can send a message to them
             mentioned_user_id = zulip_client.parse_mentioned_user_from_message(message)
-            if not mentioned_user_id:
+
+            if not next_user_id and not mentioned_user_id:
                 bot_handler.send_reply(message, "Error: please include a tag of the next artist")
                 return
+            elif next_user_id and mentioned_user_id:
+                bot_handler.send_reply(message, "Found tag for next artist, but ignoring (game has next artist already assigned)")
+            elif not next_user_id and mentioned_user_id:
+                next_drawing_id = db.init_drawing(conn, game_id, mentioned_user_id)
+                next_user_id = mentioned_user_id
+            else:
+                pass
 
-            mentioned_user_email = ZULIP_CLIENT.get_email_for_user(mentioned_user_id)
-            mentioned_user_name = ZULIP_CLIENT.get_name_for_user(mentioned_user_id)
-            if not mentioned_user_email or not mentioned_user_name:
-                bot_handler.send_reply(message, f"Error: could not get zulip email and/or name for mentioned user (id: {mentioned_user_id})")
+            next_user_email = ZULIP_CLIENT.get_email_for_user(next_user_id)
+            next_user_name = ZULIP_CLIENT.get_name_for_user(next_user_id)
+            if not next_user_email or not next_user_name:
+                bot_handler.send_reply(message, f"Error: could not get zulip email and/or name for next user (id: {next_user_id})")
                 return
 
-
-            game_id = db.get_game_id_for_drawing(conn, drawing_db_id)
-            next_drawing_id = db.init_drawing(conn, game_id, mentioned_user_id)
-            
             db.submit_drawing(
                 conn,
                 drawing_db_id,
@@ -206,14 +224,16 @@ class GameBotHandler:
             if not is_next_final:
                 next_form = image_builder.build_middle_form(
                     next_drawing_id_for_form,
-                    mentioned_user_name,
+                    next_user_name,
                     parsed_drawing,
                 )
             else:
+                first_image = db.get_image_data_by_game_id_and_drawing_number(conn, game_id, 1)
                 next_form = image_builder.build_final_form(
                     next_drawing_id_for_form,
-                    mentioned_user_name,
+                    next_user_name,
                     parsed_drawing,
+                    form_parser.convert_pil_to_opencv(first_image),
                 )
 
             img = Image.fromarray(next_form, mode="L")
@@ -240,7 +260,7 @@ Once you're done, reply to me with the `/submit` command, uploading a picture of
 
             bot_handler.send_message({
                 "type": "private",
-                "to": mentioned_user_email,
+                "to": next_user_email,
                 "subject": "Exquisite Corpse Game",
                 "content": next_user_message,
             })
@@ -382,8 +402,14 @@ Once you're done, reply to me with the `/submit` command, uploading a picture of
                         form = image_builder.build_middle_form(
                             lbls_, sender_name, prev_im_as_array)
                     else:
+
+                        first_image = db.get_image_data_by_game_id_and_drawing_number(conn, game_id, 1)
                         form = image_builder.build_final_form(
-                            lbls_, sender_name, prev_im_as_array)
+                            lbls_,
+                            sender_name,
+                            prev_im_as_array,
+                            form_parser.convert_pil_to_opencv(first_image),
+                        )
             else:
                 bot_handler.send_reply(message, "This game is incomplete, and you are not next, so you may not print this form!")
                 return

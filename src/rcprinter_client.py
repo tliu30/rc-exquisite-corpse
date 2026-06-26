@@ -32,12 +32,12 @@ class RCPrinterClient:
                     "Content-Type": f"image/jpeg",
                 }
             )
-            print(f"{response.status_code} - {response.content}")
+            print(f"rcprinter response: {response.status_code} - {response.content}")
 
         # Data has to be smaller than 65536 per send
         w, h = image.size
         total_size = len(_get_data(image))
-        step_size = int((50000 / total_size) * h)
+        step_size = int((40000 / total_size) * h)
 
         cur = 0
         while cur < h:

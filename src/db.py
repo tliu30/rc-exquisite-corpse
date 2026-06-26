@@ -30,8 +30,6 @@ def setup(conn: sqlite3.Connection):
             drawingNumber INTEGER NOT NULL,
             artistZulipId INTEGER NOT NULL,
             imageData BLOB,
-            imageWidth INTEGER,
-            imageHeight INTEGER,
             createdAt INTEGER NOT NULL,
             submittedAt INTEGER
         );
@@ -133,28 +131,34 @@ def get_submitted_image(conn: sqlite3.Connection, drawing_id: int) -> Image.Imag
 
 
 def get_game_is_complete(conn: sqlite3.Connection, game_id: int):
-    res = conn.execute(
+    game_check = conn.execute(
         """
-        SELECT
-            MAX(game.length),
-            MAX(drawing.drawingNumber)
-        FROM
-            game LEFT JOIN
-            drawing ON 
-            game.id = drawing.gameId
-        WHERE
-            game.id = ?
+        SELECT length FROM game WHERE id = ?;
         """,
         (game_id, ),
     )
+    game_record = game_check.fetchone()
 
-    record = res.fetchone()
-    print(f"get game is complete {record}")
+    drawing_check = conn.execute(
+        """
+        SELECT
+            MAX(drawing.drawingNumber)
+        FROM
+            drawing
+        WHERE
+            drawing.gameId = ? AND drawing.imageData IS NOT NULL;
+        """,
+        (game_id, ),
+    )
+    drawing_record = drawing_check.fetchone()
 
-    if not record:
+    if not game_record:
         raise Exception(f"Could not get data for game {game_id}")
 
-    return record[0] == record[1]
+    if not drawing_record:
+        return False
+
+    return game_record[0] == drawing_record[0]
 
 
 def get_all_drawings_for_game(conn: sqlite3.Connection, game_id: int) -> list[tuple[Image.Image, int]]:
@@ -196,6 +200,17 @@ def get_game_id_for_drawing(conn: sqlite3.Connection, drawing_id: int) -> int:
     )
     return res.fetchone()[0]
 
+
+def get_artist_id_for_drawing(conn: sqlite3.Connection, drawing_id: int) -> int:
+    res = conn.execute(
+        """
+        SELECT artistZulipId
+        FROM drawing
+        WHERE id = ?;
+        """,
+        (drawing_id, ),
+    )
+    return res.fetchone()[0]
 
 def get_games_for_user(conn: sqlite3.Connection, user_id: int):
     res = conn.execute(
@@ -286,10 +301,10 @@ def get_next_drawing_for_game(conn: sqlite3.Connection, game_id: int):
     return { "id": record[0], "artist_zulip_id": record[1], "drawing_number": record[2]}
 
 
-def get_drawing_by_game_id_and_drawing_number(conn: sqlite3.Connection, game_id: int, drawing_number: int):
+def get_drawing_by_game_id_and_drawing_number(conn: sqlite3.Connection, game_id: int, drawing_number: int) -> int:
     res = conn.execute(
         """
-        SELECT *
+        SELECT id 
         FROM drawing
         WHERE gameId = ? AND drawingNumber = ?;
         """,
@@ -298,16 +313,35 @@ def get_drawing_by_game_id_and_drawing_number(conn: sqlite3.Connection, game_id:
     record = res.fetchone()
 
     if not record:
-        raise Exception("No drawing found")
+        raise Exception(f"No drawing found for game {game_id} and number {drawing_number}")
 
     return record[0]
+
+
+
+def get_image_data_by_game_id_and_drawing_number(conn: sqlite3.Connection, game_id: int, drawing_number: int) -> Image.Image:
+    res = conn.execute(
+        """
+        SELECT imageData
+        FROM drawing
+        WHERE gameId = ? AND drawingNumber = ?;
+        """,
+        (game_id, drawing_number),
+    )
+    record = res.fetchone()
+
+    if not record:
+        raise Exception("No image data found")
+
+    return Image.open(BytesIO(record[0]))
+
 
 
 def get_next_drawing_number(conn: sqlite3.Connection, game_id: int) -> int:
     res = conn.execute(
         """
         SELECT
-            MAX(drawingNumber)
+            MIN(drawingNumber)
         FROM
             drawing
         WHERE
@@ -360,8 +394,7 @@ def init_drawing(
 
     existing_drawing_id = None
     try:
-        record = get_drawing_by_game_id_and_drawing_number(conn, game_id, next_drawing_number)
-        existing_drawing_id = record[0]
+        existing_drawing_id = get_drawing_by_game_id_and_drawing_number(conn, game_id, next_drawing_number)
     except Exception:
         pass
 
