@@ -53,13 +53,17 @@ class RCPrinterClient:
         # Data has to be smaller than 65536 per send
         w, h = image.size
         total_size = len(_get_data(image))
-        step_size = int((40000 / total_size) * h)
 
-        cur = 0
-        while cur < h:
-            next = min(cur + step_size, h)
-            cropped = image.crop(box=(0, cur, w, next))
-            _send(_get_data(cropped), next >= h)
-            time.sleep(1)  # wait; give time to print
-            cur = next
+        if total_size > 65000:
+            step_size = int((40000 / total_size) * h)
+
+            cur = 0
+            while cur < h:
+                next = min(cur + step_size, h)
+                cropped = image.crop(box=(0, cur, w, next))
+                _send(_get_data(cropped), next >= h)
+                time.sleep(1)  # wait; give time to print
+                cur = next
+        else:
+            _send(_get_data(image), True)
 
