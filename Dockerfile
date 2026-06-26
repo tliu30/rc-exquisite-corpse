@@ -8,4 +8,4 @@ COPY . /project
 RUN uv sync
 
 ENV PYTHONPATH=./src
-CMD ["uv", "run", "zulip-botserver", "--config-file=./botserverrc", "--hostname=0.0.0.0"]
+CMD ["uv", "run", "zulip-botserver", "--config-file=./botserverrc", "--hostname=0.0.0.0", "--port=5002"]
