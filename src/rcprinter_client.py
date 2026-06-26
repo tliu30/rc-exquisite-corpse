@@ -8,12 +8,13 @@ from form_parser import convert_pil_to_jpeg_fobj
 
 class RCPrinterClient:
 
-    def __init__(self, conf_path=config.RCPRINTER_CONF_PATH):
-        with open(conf_path, 'r') as f:
-            conf = json.load(f)
-
-        self.cookies = conf["cookies"]
-        self.csrf_token = conf["cookies"]["receipt_csrf"]
+    def __init__(self):
+        self.cookies = {
+            "receipt_csrf": config.RCPRINTER_CSRF,
+            "session": config.RCPRINTER_SESSION,
+            "session.sig": config.RCPRINTER_SESSION_SIG,
+        }
+        self.csrf_token = config.RCPRINTER_CSRF
         self.base_url = "https://receipt.recurse.com"
 
     def send_image(self, image: Image.Image) -> None:

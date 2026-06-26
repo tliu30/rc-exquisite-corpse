@@ -1,6 +1,0 @@
-[test_bot.py]
-email=from-outgoing-webhook-zuliprc
-key=from-outgoing-webhook-zuliprc
-site=from-outgoing-webhook-zuliprc
-token=from-outgoing-webhook-zuliprc
-bot-config-file=./bot.conf

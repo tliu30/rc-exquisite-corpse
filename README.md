@@ -12,3 +12,14 @@ To test the bot, run `PYTHONPATH=. uv run zulip-botserver --config-file ./botser
 You will need configuration secrets at
 - botserverrc
 - rcprinter.conf.json
+
+You will need configuration secrets at the following environment variables
+- DB_URI
+- RCPRINTER_CSRF
+- RCPRINTER_SESSION
+- RCPRINTER_SESSION_SIG
+- ZULIP_EMAIL
+- ZULIP_API_KEY
+- ZULIP_SITE
+- ZULIP_TOKEN
+- ZULIP_BOTSERVER_CONFIG

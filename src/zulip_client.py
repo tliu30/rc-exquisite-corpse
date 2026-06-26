@@ -17,7 +17,7 @@ class ZulipClientException(Exception):
 
 class ZulipClient:
 
-    def __init__(self, config_file):
+    def __init__(self, config_file: str | None):
         self.__client__ = Client(config_file=config_file)
         
     @property

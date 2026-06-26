@@ -4,14 +4,10 @@ import json
 # Assumes we are running from project root
 PROJECT_ROOT = os.path.abspath(".")
 
-config = None
-with open(os.path.join(PROJECT_ROOT, "game.conf.json")) as f:
-    config = json.load(f)
+DB_URI = os.environ.get("DB_URI")
+FONT_PATH = os.path.join(PROJECT_ROOT, "fonts/Arial.ttf")
 
-if not config:
-    raise Exception("Could not load game config from game.conf.json")
+RCPRINTER_CSRF = os.environ.get("RCPRINTER_CSRF")
+RCPRINTER_SESSION = os.environ.get("RCPRINTER_SESSION")
+RCPRINTER_SESSION_SIG = os.environ.get("RCPRINTER_SESSION_SIG")
 
-DB_URI = config.get("DB_URI")
-FONT_PATH = config.get("FONT_PATH")
-RCPRINTER_CONF_PATH = os.path.join(PROJECT_ROOT, 'rcprinter.conf.json')
-ZULIP_CONF_PATH = os.path.join(PROJECT_ROOT, 'zuliprc')

@@ -50,8 +50,8 @@ Here is an [example](https://mrdeyo.com/wp-content/uploads/2021/11/maxresdefault
 with db.get_connection() as conn:
     db.setup(conn)
 
-RCPRINTER_CLIENT = rcprinter_client.RCPrinterClient(conf_path=config.RCPRINTER_CONF_PATH)
-ZULIP_CLIENT = ZulipClient(config.ZULIP_CONF_PATH)
+RCPRINTER_CLIENT = rcprinter_client.RCPrinterClient()
+ZULIP_CLIENT = ZulipClient(None)  # Get from env vars
 
 
 PRINT_THROTTLE: dict[int, float] = {}
